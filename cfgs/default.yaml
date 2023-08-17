@@ -2,6 +2,7 @@ image_folder: samples/apple
 image_size: 224
 ckpt: co3d_model1.pth
 seed: 0
+align: True
 
 GGS:
     enable: True

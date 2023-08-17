@@ -30,7 +30,6 @@ from util.match_extraction import extract_match
 from util.load_img_folder import load_and_preprocess_images
 from util.geometry_guided_sampling import geometry_guided_sampling
 from util.metric import compute_ARE
-from visdom import Visdom
 
 
 @hydra.main(config_path="../cfgs/", config_name="default")
@@ -117,42 +116,59 @@ def main(cfg: DictConfig) -> None:
     print("Time taken: {:.4f} seconds".format(elapsed_time))
 
     # Load gt poses
-    gt_cameras_dict = np.load(os.path.join(folder_path, "gt_cameras.npz"))
-    gt_cameras = PerspectiveCameras(
-        focal_length=gt_cameras_dict["gtFL"],
-        R=gt_cameras_dict["gtR"],
-        T=gt_cameras_dict["gtT"],
-        device=device,
-    )
+    if cfg.align:
+        gt_cameras_dict = np.load(os.path.join(folder_path, "gt_cameras.npz"))
+        gt_cameras = PerspectiveCameras(
+            focal_length=gt_cameras_dict["gtFL"],
+            R=gt_cameras_dict["gtR"],
+            T=gt_cameras_dict["gtT"],
+            device=device,
+        )
 
-    # 7dof alignment, using Umeyama's algorithm
-    pred_cameras_aligned = corresponding_cameras_alignment(
-        cameras_src=pred_cameras,
-        cameras_tgt=gt_cameras,
-        estimate_scale=True,
-        mode="extrinsics",
-        eps=1e-9,
-    )
+        # 7dof alignment, using Umeyama's algorithm
+        pred_cameras_aligned = corresponding_cameras_alignment(
+            cameras_src=pred_cameras,
+            cameras_tgt=gt_cameras,
+            estimate_scale=True,
+            mode="extrinsics",
+            eps=1e-9,
+        )
 
-    # Compute the absolute rotation error
-    ARE = compute_ARE(pred_cameras_aligned.R, gt_cameras.R).mean()
+        # Compute the absolute rotation error
+        ARE = compute_ARE(pred_cameras_aligned.R, gt_cameras.R).mean()
 
-    print(
-        f"For {folder_path}: the absolute rotation error is {ARE:.6f} degrees."
-    )
-    print(f"Without GGS, it should be smaller than 3.20 degrees.")
-    print(f"With GGS, it should be smaller than 2.16 degrees.")
+        print(f"For {folder_path}: the absolute rotation error is {ARE:.6f} degrees.")
+        print(f"Without GGS, it should be smaller than 3.20 degrees.")
+        print(f"With GGS, it should be smaller than 2.16 degrees.")
 
     # For visualization
     try:
+        from visdom import Visdom
+
         viz = Visdom()
 
-        cams_show = {
-            "ours_pred": pred_cameras,
-            "ours_pred_aligned": pred_cameras_aligned,
-            "gt_cameras": gt_cameras,
-        }
-
+        if cfg.align:
+            cams_show = {
+                "ours_pred": pred_cameras,
+                "ours_pred_aligned": pred_cameras_aligned,
+                "gt_cameras": gt_cameras,
+            }
+            np.savez(
+                os.path.join(folder_path, "pred_cameras.npz"),
+                focal_length=pred_cameras_aligned.focal_length.cpu(),
+                R=pred_cameras_aligned.R.cpu(),
+                T=pred_cameras_aligned.T.cpu(),
+            )
+        else:
+            cams_show = {
+                "ours_pred": pred_cameras,
+            }
+            np.savez(
+                os.path.join(folder_path, "pred_cameras.npz"),
+                focal_length=pred_cameras.focal_length.cpu(),
+                R=pred_cameras.R.cpu(),
+                T=pred_cameras.T.cpu(),
+            )
         fig = plot_scene({f"{folder_path}": cams_show})
 
         viz.plotlyplot(fig, env="visual", win="cams")
